@@ -12,12 +12,12 @@ Both services have their own databases and communicate only via REST APIs.
 
 ### In Scope
 
-*   **Transactional Idempotency**: For create order, a "Lock-then-Check" pattern using a dedicated `idempotency_keys` table.
+*   **Transactional Idempotency**: For create order, a first Key check using a dedicated `idempotency_key` table.
 *   **Request Hashing**: payload integrity verification ensures a key isn't "hijacked" for a different order.
-*   **Persistence**: Full JPA/PostgreSQL integration for both Order and Idempotency entities.
+*   **Persistence**: JPA usage for both Order and Idempotency entities.
 *   **Inter-Service Communication**: customer-order-service connects with product-catalog-service for validation of `productOfferingIds`.
 *   **Performance**: Avoiding N+1 problem during productOfferingIds validation for all order items within a customer-order.
-*   **Containerization**: Optimized Dockerfile (using `eclipse-temurin:17-jre-alpine`) and Maven build integration.
+*   **Containerization**: Dockerfile (using `eclipse-temurin:21.0.9_10-jre-alpine-3.23`) and Maven build integration for both services.
 
 ### Out of Scope (The Cuts)
 *   **Redis Caching**: While faster, we prioritized **strict consistency** via PostgreSQL for this implementation to ensure no race conditions during the "lock" phase.
@@ -28,13 +28,13 @@ Both services have their own databases and communicate only via REST APIs.
 * **Decision:** Combined `Idempotency-Key` (header) with a SHA-256 `request_hash`.
 * **Why:** To prevent "Key Recycling" errors where a client reuses a key but changes the body.
 * **Tradeoff:** If the first request fails mid-transaction, a subsequent request might see a "Processing" state. I used a `TOO_MANY_REQUESTS` (429) status to signal the client to back off until the initial transaction resolves.
-*   **Decision** : Instead of a simple "if-exists" check in Java (which is prone to race conditions), we use the Database as the atomic arbiter.
-*   **Why**: By running `saveAndFlush` on a record with a `UNIQUE` constraint on the `key` column, the database effectively acts as a distributed lock.
+*   **Decision** : Instead of a simple "if-exists" check in Java (which is prone to race conditions), we use the Database Entity for persistence.
+*   **Why**: By running `saveAndFlush` on a new record with a `UNIQUE` constraint on the `key` column, the database effectively acts as a distributed lock.
 *   **Tradeoff**: This adds a write operation even for potentially duplicate requests, but it is the only way to guarantee 100% safety in a multi-instance deployment.
 
 ### Validation Placement
 * **Decision:** Business validation (Payment method, Catalog check) occurs **before** we attempt to write to the idempotency table.
-*   **Why**: We do not want to "spend" a client's idempotency key if the request itself is malformed or logically invalid.
+*   **Why**: To prevent "spending" a client's idempotency key if the request itself is malformed or logically invalid.
 *   **Tradeoff**: If the service crashes after validation but before the lock, the client can safely retry.
 * **Direct Debit Validation:** The validation currently checks for a non-blank IBAN string. IBAN format is not checked.
 
@@ -54,7 +54,7 @@ The project includes comprehensive JUnit 5 tests to verify the transactional int
 ### Inter-service Communication
 * **Decision:** Synchronous validation via `CatalogClient`.
 * **Why:** Ordering an item that doesn't exist is a "hard" business failure. The `POST` request therefore fails immediately even before a DB Fetch is performed.
-* 
+
 ### Status Code Choices
 
 #### Create-order
@@ -143,6 +143,8 @@ docker-compose down -v
 ## APIs
 
 **customer-order-service**
+
+**For enum values, please use the same string values as provided in the exercise document by you**
 
 ### List all orders- GET `http://localhost:8080/customer-orders`
 
@@ -247,6 +249,8 @@ docker-compose down -v
 Response with full order details similar to above request
 
 ### PATCH order with Idemoteny-key- PATCH `http://localhost:8080/customer-orders/{id}`
+
+
 ```json
 {
 "category": "B2B",
