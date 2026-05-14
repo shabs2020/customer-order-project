@@ -114,9 +114,6 @@ public class OrderServiceCreateTest {
     @Test
     @DisplayName("Should return existing order when duplicate request is sent (Replay)")
     void createOrder_DuplicateKey_ReturnsReplay() {
-        doThrow(new DataIntegrityViolationException("Duplicate key"))
-                .when(idempotencyRepository).saveAndFlush(any());
-
         String expectedHash = (String) ReflectionTestUtils.invokeMethod(orderService, "generateHash", createDTO);
         IdempotencyKey existingRecord = IdempotencyKey.builder()
                 .key(KEY)
@@ -135,9 +132,6 @@ public class OrderServiceCreateTest {
     @Test
     @DisplayName("Should throw Conflict if same key is used with different payload")
     void createOrder_SameKeyDifferentPayload_ThrowsConflict() {
-        doThrow(new DataIntegrityViolationException("Duplicate key"))
-                .when(idempotencyRepository).saveAndFlush(any());
-
         IdempotencyKey existingRecord = IdempotencyKey.builder()
                 .key(KEY).requestHash("TOTALLY_DIFFERENT_HASH").build();
 
@@ -147,9 +141,6 @@ public class OrderServiceCreateTest {
     @Test
     @DisplayName("Should throw error if first request is still processing (No orderId yet)")
     void createOrder_StillProcessing_ThrowsError() {
-        // Arrange
-        doThrow(new DataIntegrityViolationException("Duplicate key"))
-                .when(idempotencyRepository).saveAndFlush(any());
         String expectedHash = (String) ReflectionTestUtils.invokeMethod(orderService, "generateHash", createDTO);
 
         IdempotencyKey inProgressRecord = IdempotencyKey.builder()

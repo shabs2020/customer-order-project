@@ -65,18 +65,28 @@ public class OrderService {
             CustomerOrder createdOrder = orderRepository.save(buildCustomerOrder(dto));
             return new OrderResponseIdempotencyDTO(mapper.mapToOrderResponseDTO(createdOrder),false);
         }
-                String currentHash = generateHash(dto);
+        String currentHash = generateHash(dto);
+        Optional<IdempotencyKey> existing = idempotencyRepository.findById(key);
+        if (existing.isPresent()) {
+            // If it exists, use your existing logic to handle the replay or conflict
+            return handleExistingKey(existing.get(), currentHash);
+        }
         try{
-            IdempotencyKey newRecord = IdempotencyKey.builder().key(key)
-                            .expiryDate(LocalDateTime.now().plusHours(24))
-                                    .requestHash(currentHash).build();
+            IdempotencyKey newRecord = IdempotencyKey.builder()
+                    .key(key)
+                    .requestHash(currentHash)
+                    .expiryDate(LocalDateTime.now().plusHours(24))
+                    .build();
             idempotencyRepository.saveAndFlush(newRecord);
+            log.info(dto.customer().id());
             CustomerOrder newOrder = orderRepository.save(buildCustomerOrder(dto));
             newRecord.setOrderId(newOrder.getId());
             idempotencyRepository.save(newRecord);
             return new OrderResponseIdempotencyDTO(mapper.mapToOrderResponseDTO(newOrder), false);
         } catch (DataIntegrityViolationException e) {
-            return handleExistingKey(key, currentHash);
+            IdempotencyKey raceConditionRecord = idempotencyRepository.findById(key)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR));
+            return handleExistingKey(raceConditionRecord, currentHash);
         }
     }
 
@@ -162,19 +172,16 @@ public class OrderService {
                 offset
         );
     }
-    private OrderResponseIdempotencyDTO handleExistingKey(String key, String currentHash) {
-        IdempotencyKey existingRecord = idempotencyRepository.findById(key)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Key conflict detected but record not found."));
-
-        // RULE: Same key + Different payload = 409 Conflict
-        if (!existingRecord.getRequestHash().equals(currentHash)) {
+    private OrderResponseIdempotencyDTO handleExistingKey(IdempotencyKey existingKeyRecord, String currentHash) {
+               // RULE: Same key + Different payload = 409 Conflict
+        if (!existingKeyRecord.getRequestHash().equals(currentHash)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "The Idempotency-Key is already associated with a different request payload.");
         }
 
         // RULE: Same key + Identical payload = Replay Result
-        if (existingRecord.getOrderId() != null) {
-            CustomerOrder order = orderRepository.findById(existingRecord.getOrderId())
+        if (existingKeyRecord.getOrderId() != null) {
+            CustomerOrder order = orderRepository.findById(existingKeyRecord.getOrderId())
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Original order not found."));
             return new OrderResponseIdempotencyDTO(mapper.mapToOrderResponseDTO(order),true);
         }

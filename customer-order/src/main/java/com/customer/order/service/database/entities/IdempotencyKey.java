@@ -16,9 +16,9 @@ import lombok.Setter;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class IdempotencyKey {
+public class IdempotencyKey{
     @Id
-    @Column(name = "idempotency_key", length = 255)
+    @Column(name = "idempotency_key", length = 255, unique = true)
     private String key;
 
     @Column(nullable = false)

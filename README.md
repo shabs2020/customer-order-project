@@ -71,8 +71,8 @@ The project includes comprehensive JUnit 5 tests to verify the transactional int
 
 
 ### Assumptions
-1.  **Client Responsibility**: We assume the client generates a unique `Idempotency-Key` (UUID) for every unique intent.
-2.  **Clock Sync**: We assume the server clock is reliable for the `expiryDate` calculation (default 24h).
+1.  **Client Responsibility**: It is assumed the client generates a unique `Idempotency-Key` (string) for every unique intent.
+2.  **Clock Sync**: It is assumed the server clock is reliable for the `expiryDate` calculation (default 24h).
 
 ### Known Limitations
 *   **Orphaned Keys**: If a transaction fails after the idempotency record is saved but before the order is saved, the key stays in the DB with a `null` order ID.
@@ -216,6 +216,7 @@ docker-compose down -v
 }
 ```
 ### Create order with Idemoteny-key- POST `http://localhost:8080/customer-orders`
+**Request-Header : Idempotency-Key** = "test-key-106" (example)
 
 **Request-Body**
 
@@ -287,12 +288,12 @@ For Submitted orders ready to be confirmed : only post the new status
 ```
 These offerings have been imported during startup of the catalog-db via initSQL
 
-###  Product catalog item with ID GET: `http://localhost:8081/product-offerings/{id}
+###  Product catalog item with ID GET: `http://localhost:8081/product-offerings/{id}`
 
 ```json
 {"id":"po-1","name":"Small Widget","price":29.99}
 ```
-###  Validate product ids POST: `http://localhost:8081/product-offerings/validate
+###  Validate product ids POST: `http://localhost:8081/product-offerings/validate`
 
 **Request Body**
 
@@ -305,5 +306,5 @@ These offerings have been imported during startup of the catalog-db via initSQL
 404 Not Found when a product id not found
 
 ## Databases:
-Both databases can be accessed by phpmyadmin running on http://localhost:8088
+Both databases can be accessed by phpmyadmin running on `http://localhost:8088`
 Database names are: customer-order-db & product-catalog-db
