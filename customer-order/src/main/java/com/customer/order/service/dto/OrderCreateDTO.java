@@ -16,6 +16,7 @@ public record OrderCreateDTO(
         @Valid
         SiteDTO site,
 
+        @Valid
         @NotEmpty(message = "Order orders cannot be empty")
         List<OrderItemDTO> orderItems,
 

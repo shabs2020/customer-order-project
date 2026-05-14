@@ -7,14 +7,11 @@ import com.customer.order.service.dto.OrderResponseDTO;
 import com.customer.order.service.dto.OrderResponseIdempotencyDTO;
 import com.customer.order.service.service.OrderService;
 import jakarta.validation.Valid;
-import java.util.Map;
 import java.util.UUID;
 import lombok.AllArgsConstructor;
-import lombok.RequiredArgsConstructor;
 import org.apache.coyote.BadRequestException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -35,7 +32,7 @@ public class CustomerOrderController {
     @PostMapping
     public ResponseEntity<OrderResponseDTO> createOrder(
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
-            @RequestBody @Valid OrderCreateDTO request) {
+            @Valid @RequestBody OrderCreateDTO request) {
 
         OrderResponseIdempotencyDTO createOrderResponse = orderService.createOrder(request, idempotencyKey);
         if (createOrderResponse.isReplay()) {
@@ -67,7 +64,7 @@ public class CustomerOrderController {
     @PatchMapping("/{id}")
     public ResponseEntity<OrderResponseDTO> updateOrder(
             @PathVariable UUID id,
-            @RequestBody OrderPatchDTO patchOrder) {
+            @Valid @RequestBody OrderPatchDTO patchOrder) {
         return ResponseEntity.ok(orderService.patchOrder(id, patchOrder));
     }
 }
