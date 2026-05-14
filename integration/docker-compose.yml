@@ -1,0 +1,102 @@
+services:
+  # --- THE DATABASES---
+  product-catalog-db:
+    image: mariadb:11
+    container_name: product-catalog-db
+    ports:
+      - "33006:3306"
+    environment:
+      MARIADB_ROOT_PASSWORD: rootpass
+      MARIADB_DATABASE: catalog_db
+      MARIADB_USER: pyur
+      MARIADB_PASSWORD: admin
+    healthcheck:
+      test: [ "CMD", "healthcheck.sh", "--connect", "--innodb_initialized" ]
+      start_period: 10s
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    command: --max_connections=800
+    volumes:
+#      # This script (init.sql) will create the second schema (catalog_db) on startup
+      - ./init-db:/docker-entrypoint-initdb.d
+    networks:
+      - pyur-network
+
+  customer-order-db:
+    image: mariadb:11
+    container_name: customer-order-db
+    ports:
+      - "33106:3306"
+    environment:
+      MARIADB_ROOT_PASSWORD: rootpass
+      MARIADB_DATABASE: order_db
+      MARIADB_USER: pyur
+      MARIADB_PASSWORD: admin
+    healthcheck:
+      test: [ "CMD", "healthcheck.sh", "--connect", "--innodb_initialized" ]
+      start_period: 10s
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    command: --max_connections=800
+    volumes:
+      #      # This script (init.sql) will create the second schema (catalog_db) on startup
+      - ./init-db:/docker-entrypoint-initdb.d
+    networks:
+      - pyur-network
+  phpmyadmin:
+    image: phpmyadmin:latest
+    container_name: phpmyadmin
+    links:
+      - product-catalog-db
+      - customer-order-db
+    environment:
+      PMA_HOSTS: product-catalog-db,customer-order-db
+      PMA_PORTS: 3306,3306
+    ports:
+      - "8088:80"
+    networks:
+      - pyur-network
+    depends_on:
+      - product-catalog-db
+      - customer-order-db
+  # --- CUSTOMER ORDER SERVICE ---
+  customer-order-service:
+    image: pyur/customer-order-service:latest
+    container_name: customer-order-service
+    pull_policy: never
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mariadb://customer-order-db:3306/order_db
+      SPRING_DATASOURCE_USERNAME: "pyur"
+      SPRING_DATASOURCE_PASSWORD: "admin"
+      SPRING_DATASOURCE_INITIALIZE: "true"
+      CATALOG_SERVICE_URL_BASE: http://product-catalog-service:8081
+    depends_on:
+      customer-order-db:
+        condition: service_healthy
+    networks:
+      - pyur-network
+
+  # --- PRODUCT CATALOG SERVICE ---
+  product-catalog-service:
+    image: pyur/product-catalog-service:latest
+    container_name: product-catalog-service
+    ports:
+      - "8081:8081"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mariadb://product-catalog-db:3306/catalog_db
+      SPRING_DATASOURCE_USERNAME: "pyur"
+      SPRING_DATASOURCE_PASSWORD: "admin"
+      SPRING_DATASOURCE_INITIALIZE: "true"
+    depends_on:
+      product-catalog-db:
+        condition: service_healthy
+    networks:
+      - pyur-network
+
+networks:
+  pyur-network:
+    external: true
