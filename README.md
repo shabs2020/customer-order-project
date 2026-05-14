@@ -248,7 +248,7 @@ docker-compose down -v
 ```
 Response with full order details similar to above request
 
-### PATCH order with Idemoteny-key- PATCH `http://localhost:8080/customer-orders/{id}`
+### PATCH order with ID PATCH `http://localhost:8080/customer-orders/{id}`
 
 
 ```json
