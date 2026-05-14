@@ -144,7 +144,7 @@ docker-compose down -v
 
 **customer-order-service**
 
-**For enum values, please use the same string values as provided in the exercise document by you**
+**For enum values, please use the same string values(case-insensitive) as provided in the exercise document by you**
 
 ### List all orders- GET `http://localhost:8080/customer-orders`
 

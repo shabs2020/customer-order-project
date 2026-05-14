@@ -7,5 +7,5 @@ USER pyur:pyur
 # The plugin provides the context; we just copy the JAR from target
 COPY maven/product-catalog-*.jar app.jar
 
-EXPOSE 8080
+EXPOSE 8081
 ENTRYPOINT ["java", "-jar", "app.jar"]

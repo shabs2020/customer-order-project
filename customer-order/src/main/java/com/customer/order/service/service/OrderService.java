@@ -27,7 +27,6 @@ import java.time.LocalDateTime;
 import java.util.Base64;
 import java.util.List;
 import java.util.NoSuchElementException;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -94,10 +93,13 @@ public class OrderService {
 
     @Transactional
     public OrderResponseDTO patchOrder(UUID id, OrderPatchDTO patchOrderDTO) {
-
+        //Validate if payment method in request is correct for direct_debit
+        if(patchOrderDTO.paymentType() != null){
+            validatePaymentMethod(patchOrderDTO.paymentType());
+        }
         //Check if productOfferingId exists in product catalog service
-        if(patchOrderDTO.items() != null){
-            List<String> productIds = patchOrderDTO.items().stream()
+        if(patchOrderDTO.orderItems() != null){
+            List<String> productIds = patchOrderDTO.orderItems().stream()
                     .map(OrderItemDTO::productOfferingId)
                     .toList();
             catalogClient.verifyOfferingExists(productIds);
@@ -127,9 +129,8 @@ public class OrderService {
         }
 
        //Transition Validation
-        if(patchOrderDTO.state() != null && !patchOrderDTO.state().equals(currentState.getValue())){
-            OrderState nextState = OrderState.fromValue(patchOrderDTO.state());
-            log.info("next State should be {}", nextState.getValue());
+        if(patchOrderDTO.state() != null && !patchOrderDTO.state().toLowerCase().equals(currentState.getValue())){
+            OrderState nextState = OrderState.fromValue(patchOrderDTO.state().toLowerCase());
             log.info("checkTransition {}", currentState.checkTransition(nextState));
             if(!currentState.checkTransition(nextState)){
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
@@ -162,7 +163,7 @@ public class OrderService {
             resultPage = orderRepository.findAll(pageable);
         }
         else{
-            resultPage = orderRepository.findByCategory(category, pageable);
+            resultPage = orderRepository.findByCategory(OrderCategory.valueOf(category.toUpperCase()), pageable);
         }
         List<OrderResponseDTO> orderList = resultPage.getContent().stream().map(mapper::mapToOrderResponseDTO).toList();
         return new OrderListResponseDTO(
@@ -194,7 +195,7 @@ public class OrderService {
     private void validatePaymentMethod(PaymentTypeDTO paymentMethod) {
         // 1. Check if the type is DIRECT_DEBIT (ignoring case for flexibility)
         log.info(paymentMethod.type());
-        if (paymentMethod.type().equals(PaymentType.DIRECT_DEBIT.toString())) {
+        if (paymentMethod.type().toUpperCase().equals(PaymentType.DIRECT_DEBIT.toString())) {
 
             // 2. If it is direct debit, the IBAN must not be null or blank
             if (paymentMethod.iban() == null || paymentMethod.iban().isBlank()) {
@@ -206,11 +207,11 @@ public class OrderService {
 
     private CustomerOrder buildCustomerOrder(OrderCreateDTO dto){
         return CustomerOrder.builder()
-                .category(OrderCategory.valueOf(dto.category()))
+                .category(OrderCategory.valueOf(dto.category().toUpperCase()))
                 .state(OrderState.DRAFT) // Force initial state
                 .customer(Customer.builder().id(dto.customer().id()).build())
                 .site(Site.builder().id(dto.site().id()).build())
-                .paymentMethod(PaymentMethod.builder().paymentType(PaymentType.valueOf(dto.paymentType().type())).iban(dto.paymentType().iban()).build())
+                .paymentMethod(PaymentMethod.builder().paymentType(PaymentType.valueOf(dto.paymentType().type().toUpperCase())).iban(dto.paymentType().iban()).build())
                 .orderItems(dto.orderItems().stream().map(this::mapItemToEntity).toList())
                 .build();
     }
@@ -236,7 +237,7 @@ public class OrderService {
 
     private boolean isDataBeingModified(CustomerOrder existingOrder, OrderPatchDTO patch) {
         // Check Category
-        if (patch.category() != null && !patch.category().equals(existingOrder.getCategory())) {
+        if (patch.category() != null && !OrderCategory.valueOf(patch.category().toUpperCase()).equals(existingOrder.getCategory())) {
             return true;
         }
 
@@ -245,18 +246,18 @@ public class OrderService {
             return true;
         }
 
-/*        // Check Site
-        if (patch.site() != null && !patch.site().id().equals(existingOrder.getSiteId())) {
+        // Check Site
+        if (patch.site() != null && !patch.site().id().equals(existingOrder.getSite().getId())) {
             return true;
-        }*/
+        }
 
         // Check Order Items (Comparing lists)
-        if (patch.items() != null) {
+        if (patch.orderItems() != null) {
             // Map DTO orders to a comparable format or compare directly
-            if(patch.items().size()!=existingOrder.getOrderItems().size()){
+            if(patch.orderItems().size()!=existingOrder.getOrderItems().size()){
                 return true;
             }
-            List<OrderItems> mappedItems = patch.items().stream().map(this::mapItemToEntity).toList();
+            List<OrderItems> mappedItems = patch.orderItems().stream().map(this::mapItemToEntity).toList();
             if (!mappedItems.equals(existingOrder.getOrderItems())) {
                 return true;
             }
@@ -264,10 +265,11 @@ public class OrderService {
 
         // Check Payment Method
         if (patch.paymentType() != null) {
-            PaymentMethod current = existingOrder.getPaymentMethod();
-            PaymentType paymentType = PaymentType.valueOf(patch.paymentType().type());
-            if (paymentType != current.getPaymentType() ||
-                    !Objects.equals(patch.paymentType().iban(), current.getIban())) {
+            PaymentMethod patchPayment = PaymentMethod.builder()
+                    .paymentType(PaymentType.valueOf(patch.paymentType().type().toUpperCase()))
+                    .iban(patch.paymentType().iban())
+                    .build();
+            if (!patchPayment.equals(existingOrder.getPaymentMethod())) {
                 return true;
             }
         }
@@ -277,24 +279,26 @@ public class OrderService {
 
     private void applyDataUpdates(CustomerOrder existingOrder, OrderPatchDTO patchOrder) {
 
-        if (patchOrder.category() != null) existingOrder.setCategory(OrderCategory.valueOf(patchOrder.category()));
+        if (patchOrder.category() != null) existingOrder.setCategory(OrderCategory.valueOf(patchOrder.category().toUpperCase()));
 
         if (patchOrder.customer() != null) {
-            existingOrder.getCustomer().setId(patchOrder.customer().id());
+            existingOrder.setCustomer(Customer.builder().id(patchOrder.customer().id()).build());
         }
 
         if (patchOrder.site() != null) {
-            existingOrder.getSite().setId(patchOrder.site().id());
+            existingOrder.setSite(Site.builder().id(patchOrder.site().id()).build());
         }
 
-        if (patchOrder.items() != null) {
-            List<String> ids = patchOrder.items().stream()
-                    .map(OrderItemDTO::productOfferingId).toList();
-            existingOrder.setOrderItems(patchOrder.items().stream().map(this::mapItemToEntity).toList());
-        }
+        if (patchOrder.orderItems() != null) {
+            existingOrder.getOrderItems().clear();
+            existingOrder.getOrderItems().addAll(
+                    patchOrder.orderItems().stream()
+                            .map(this::mapItemToEntity)
+                            .toList()
+            );        }
 
         if (patchOrder.paymentType() != null) {
-            existingOrder.setPaymentMethod(PaymentMethod.builder().paymentType(PaymentType.valueOf(patchOrder.paymentType().type())).iban(patchOrder.paymentType().iban()).build());
+            existingOrder.setPaymentMethod(PaymentMethod.builder().paymentType(PaymentType.valueOf(patchOrder.paymentType().type().toUpperCase())).iban(patchOrder.paymentType().iban()).build());
         }
     }
 
