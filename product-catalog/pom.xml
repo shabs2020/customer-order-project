@@ -11,7 +11,7 @@
 	<artifactId>product-catalog</artifactId>
 	<version>1.0.0</version>
 	<properties>
-		<image.name>pyur/product-catalog-service</image.name>
+		<image.name>example/product-catalog-service</image.name>
 		<docker.push.phase>deploy</docker.push.phase>
 	</properties>
 	<dependencies>

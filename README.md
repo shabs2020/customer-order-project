@@ -1,3 +1,6 @@
+Please read [USECASE.md](USECASE.md) for details on the requirements
+
+
 # Customer-service-project
 
 ## Architecture
@@ -95,7 +98,7 @@ To build the project and start the full stack (Services + MariaDBs):
 *  In customer-order-project folder:
     `mvn clean install`
 * Create docker network (if not exists)
-  `docker network create pyur-network`
+  `docker network create customer-network`
 * Go to integration folder
   `cd integration`
   `docker compose up`
@@ -115,19 +118,21 @@ docker-compose down -v
 
 ### Reachable Endpoints
 *   **Customer Order Service API**: `http://localhost:8080/customer-orders`
-*   **Product Catalog Service API**: `http://localhost:8081/product-offerings` 
+*   **Product Catalog Service API**: `http://localhost:8081/product-offerings`
 ```
 
 ### Configuration
 
 **customer-order-service**
 
-| Property                   | env var                           |                  default value                  | mandatory   | description                 |
-|----------------------------|-----------------------------------|:-----------------------------------------------:|:-----------:|-----------------------------|
-| server.port                | SERVER_PORT                       |                      8080                       |             | local server port to listen |
-| spring.datasource.url      | SPRING_DATASOURCE_URL             | jdbc:mariadb://customer-order-db:3306/order_db  |      x      | mariadb url                 |
-| spring.datasource.username | SPRING_DATASOURCE_USERNAME        |                      pyur                       |      x      | mariadb username            |
-| spring.datasource.password | SPRING_DATASOURCE_PASSWORD        |                      admin                      |      x      | mariadb password            |
+| Property                   | env var                    |                 default value                  | mandatory | description                                            |
+|----------------------------|----------------------------|:----------------------------------------------:|:---------:|--------------------------------------------------------|
+| server.port                | SERVER_PORT                |                      8080                      |           | local server port to listen                            |
+| spring.datasource.url      | SPRING_DATASOURCE_URL      | jdbc:mariadb://customer-order-db:3306/order_db |     x     | mariadb url                                            |
+| spring.datasource.username | SPRING_DATASOURCE_USERNAME |                      admin                      |     x     | mariadb username                                       |
+| spring.datasource.password | SPRING_DATASOURCE_PASSWORD |                     admin                      |     x     | mariadb password                                       |
+| idempotency.expiry.limit   | IDEMPOTENCY_EXPIRY_LIMIT   |                   24(Hours)                    |           | Limit in seconds to set the expiry of idempotency keys |
+
 
 
 **product-catalog-service**
@@ -136,7 +141,7 @@ docker-compose down -v
 |----------------------------|----------------------------------|:-------------------------------------------------:|:-----------:|------------------------------|
 | server.port                | SERVER_PORT                      |                       8081                        |             | local server port to listen  |
 | spring.datasource.url      | SPRING_DATASOURCE_URL            | jdbc:mariadb://product-catalog-db:3306/catalog_db |      x      | mariadb url                  |
-| spring.datasource.username | SPRING_DATASOURCE_USERNAME       |                       pyur                        |      x      | mariadb username             |
+| spring.datasource.username | SPRING_DATASOURCE_USERNAME       |                       admin                        |      x      | mariadb username             |
 | spring.datasource.password | SPRING_DATASOURCE_PASSWORD       |                       admin                       |      x      | mariadb password             |
 
 

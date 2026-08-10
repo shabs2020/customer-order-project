@@ -15,7 +15,7 @@
     <packaging>jar</packaging>
 
     <properties>
-        <image.name>pyur/customer-order-service</image.name>
+        <image.name>example/customer-order-service</image.name>
     </properties>
     <dependencies>
         <dependency>
