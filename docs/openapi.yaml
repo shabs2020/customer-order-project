@@ -1,0 +1,364 @@
+# OpenAPI/Swagger Document for Customer-Order and Product Catalog Services
+openapi: 3.0.0
+info:
+  title: Customer-Order and Product Catalog APIs
+  description: APIs for managing customer orders and product catalogs
+  version: 1.0.0
+servers:
+  - url: http://localhost:8080
+    description: Customer Order Service
+  - url: http://localhost:8081
+    description: Product Catalog Service
+
+paths:
+  # Customer Order Service
+  /customer-orders:
+    post:
+      tags:
+        - Customer Orders
+      summary: Create a new order
+      description: Create a new order with the provided details
+      operationId: createOrder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderCreateDTO'
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          schema:
+            type: string
+            description: Optional idempotency key for replay detection
+          required: false
+      responses:
+        '201':
+          description: Order created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponseDTO'
+        '200':
+          description: Order already processed (replay)
+          headers:
+            X-Is-Replay:
+              schema:
+                type: string
+                description: Indicates replay
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponseIdempotencyDTO'
+        '409':
+          description: Conflict due to different payload (hash mismatch | Idempotency key already used with a different request)
+        '429':
+          description: Too many requests (Request with idempotency key is still processin)
+        '500':
+          description: Internal server error during idempotency processing (Order referenced by idempotency key not found)
+
+    get:
+      tags:
+        - Customer Orders
+      summary: List orders
+      description: List orders based on category, limit, and offset
+      operationId: listOrders
+      parameters:
+        - in: query
+          name: category
+          schema:
+            type: string
+          description: Filter orders by category
+          required: false
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 20
+          description: Number of orders to return
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            default: 0
+          description: Pagination offset
+      responses:
+        '200':
+          description: List of orders
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderListResponseDTO'
+
+  /customer-orders/{id}:
+    get:
+      tags:
+        - Customer Orders
+      summary: Get order by ID
+      description: Retrieve a specific order by its ID
+      operationId: getOrderById
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+            format: uuid
+          description: ID of the order
+          required: true
+      responses:
+        '200':
+          description: Order details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponseDTO'
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    description: Error message
+
+    patch:
+      tags:
+        - Customer Orders
+      summary: Update order
+      description: Update an existing order
+      operationId: patchOrder
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+            format: uuid
+          description: ID of the order
+          required: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderPatchDTO'
+      responses:
+        '200':
+          description: Order updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponseDTO'
+
+  # Product Catalog Service
+  /product-offerings:
+    get:
+      tags:
+        - Product Catalog
+      summary: Get all product offerings
+      description: Retrieve all product offerings
+      operationId: getAllProducts
+      responses:
+        '200':
+          description: List of product offerings
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProductOffering'
+
+  /product-offerings/{id}:
+    get:
+      tags:
+        - Product Catalog
+      summary: Get product offering by ID
+      description: Retrieve a specific product offering by its ID
+      operationId: getProductById
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          description: ID of the product offering
+          required: true
+      responses:
+        '200':
+          description: Product offering details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductOffering'
+        '404':
+          description: Product offering not found
+
+  /product-offerings/validate:
+    post:
+      tags:
+        - Product Catalog
+      summary: Validate product IDs
+      description: Validate if the provided product IDs exist
+      operationId: validateProducts
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: string
+      responses:
+        '204':
+          description: No content (all products validated successfully)
+        '404':
+          description: One or more products not found
+
+components:
+  schemas:
+    # Customer Order DTOs
+    OrderCreateDTO:
+      type: object
+      properties:
+        category:
+          type: string
+          enum:
+            - B2B
+            - B2C
+        customer:
+          $ref: '#/components/schemas/Customer'
+        site:
+          $ref: '#/components/schemas/Site'
+        orderItems:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItem'
+        paymentType:
+          $ref: '#/components/schemas/PaymentMethod'
+
+    OrderResponseDTO:
+      type: object
+      properties:
+        category:
+          type: string
+          enum:
+            - B2B
+            - B2C
+        id:
+          type: string
+          format: uuid
+        customer:
+          $ref: '#/components/schemas/Customer'
+        site:
+          $ref: '#/components/schemas/Site'
+        paymentMethod:
+          $ref: '#/components/schemas/PaymentMethod'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItem'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    OrderResponseIdempotencyDTO:
+      type: object
+      properties:
+        dto:
+          $ref: '#/components/schemas/OrderResponseDTO'
+        replay:
+          type: boolean
+
+    OrderListResponseDTO:
+      type: object
+      properties:
+        orders:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderResponseDTO'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    OrderPatchDTO:
+      type: object
+      properties:
+        category:
+          type: string
+          enum:
+            - B2B
+            - B2C
+        state:
+          type: string
+        customer:
+          $ref: '#/components/schemas/Customer'
+        site:
+          $ref: '#/components/schemas/Site'
+        orderItems:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItem'
+        paymentType:
+          $ref: '#/components/schemas/PaymentMethod'
+
+    # PaymentType and PaymentMethod Schemas
+    PaymentType:
+      type: object
+      properties:
+        type:
+          type: string
+          enum:
+            - INVOICE
+            - DIRECT_DEBIT
+          description: Type of payment method
+
+    PaymentMethod:
+      type: object
+      properties:
+        type:
+          type: string
+          enum:
+            - INVOICE
+            - DIRECT_DEBIT
+        iban:
+          type: string
+          format: iban
+          description: IBAN is required for DIRECT_DEBIT
+
+    # Product Catalog DTOs
+    OrderItem:
+      type: object
+      properties:
+        productOfferingId:
+          type: string
+        quantity:
+          type: integer
+          minimum: 1
+
+    Customer:
+      type: object
+      properties:
+        id:
+          type: string
+
+    Site:
+      type: object
+      properties:
+        id:
+          type: string
+
+    ProductOffering:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        price:
+          type: number

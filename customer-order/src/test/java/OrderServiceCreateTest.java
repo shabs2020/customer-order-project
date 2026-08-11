@@ -4,12 +4,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.customer.order.service.client.CatalogClient;
+import com.customer.order.service.component.CatalogClient;
 import com.customer.order.service.database.embeddables.Customer;
 import com.customer.order.service.database.embeddables.PaymentMethod;
 import com.customer.order.service.database.embeddables.Site;
@@ -26,20 +25,19 @@ import com.customer.order.service.dto.OrderCreateDTO;
 import com.customer.order.service.dto.OrderItemDTO;
 import com.customer.order.service.dto.PaymentTypeDTO;
 import com.customer.order.service.dto.SiteDTO;
-import com.customer.order.service.mappers.EntityToDtoMapping;
-import com.customer.order.service.service.OrderService;
+import com.customer.order.service.service.*;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
-import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.server.ResponseStatusException;
 
 @ExtendWith(MockitoExtension.class)
@@ -52,7 +50,10 @@ public class OrderServiceCreateTest {
     @Mock
     private CatalogClient catalogClient;
 
-    private EntityToDtoMapping mapper;
+    private OrderMapper orderMapper;
+    private IdempotencyService idempotencyService;
+    private OrderValidationService orderValidationService;
+    private OrderStateMachine orderStateMachine;
 
     private OrderService orderService;
 
@@ -63,10 +64,17 @@ public class OrderServiceCreateTest {
 
     @BeforeEach
     void setUp() {
-        this.mapper = new EntityToDtoMapping();
-        this.orderService = new OrderService(this.orderRepository,
-                this.idempotencyRepository,this.catalogClient,
-                this.mapper);
+        this.orderMapper = new OrderMapper();
+        this.idempotencyService = new IdempotencyService(this.idempotencyRepository, this.orderRepository, this.orderMapper);
+        this.orderValidationService = new OrderValidationService(this.catalogClient);
+        this.orderStateMachine = new OrderStateMachine();
+        this.orderService = new OrderService(
+                this.orderRepository,
+                this.idempotencyService,
+                this.orderValidationService,
+                this.orderStateMachine,
+                this.orderMapper
+        );
 
         orderId = UUID.randomUUID();
         newOrderEntity = CustomerOrder.builder()
@@ -78,11 +86,10 @@ public class OrderServiceCreateTest {
                 .state(OrderState.DRAFT)
                 .orderItems(List.of(OrderItems.builder().id(1L).productOfferingId("po-1").quantity(1).build()))
                 .build();
-        createDTO= new OrderCreateDTO(
-                "B2B",new CustomerDTO("CUST-01"), new SiteDTO("SITE-A"),
+        createDTO = new OrderCreateDTO(
+                "B2B", new CustomerDTO("CUST-01"), new SiteDTO("SITE-A"),
                 List.of(new OrderItemDTO("PROD-1", 1)),
-                new PaymentTypeDTO(PaymentType.INVOICE.name(), null)
-        );
+                new PaymentTypeDTO(PaymentType.INVOICE.name(), null));
     }
 
     @Test
@@ -103,6 +110,7 @@ public class OrderServiceCreateTest {
     @DisplayName("Should store key and create order on first request")
     void createOrder_FirstTimeWithKey_Success() {
         when(idempotencyRepository.saveAndFlush(any())).thenReturn(new IdempotencyKey());
+        when(idempotencyRepository.findById(KEY)).thenReturn(Optional.empty()).thenReturn(Optional.of(new IdempotencyKey()));
         when(orderRepository.save(any())).thenReturn(newOrderEntity);
         var result = orderService.createOrder(createDTO, KEY);
 
@@ -111,10 +119,11 @@ public class OrderServiceCreateTest {
         verify(idempotencyRepository).saveAndFlush(any()); // Initial lock
         verify(idempotencyRepository).save(any()); // Update with orderId
     }
+
     @Test
     @DisplayName("Should return existing order when duplicate request is sent (Replay)")
     void createOrder_DuplicateKey_ReturnsReplay() {
-        String expectedHash = (String) ReflectionTestUtils.invokeMethod(orderService, "generateHash", createDTO);
+        String expectedHash = idempotencyService.generateHash(createDTO);
         IdempotencyKey existingRecord = IdempotencyKey.builder()
                 .key(KEY)
                 .requestHash(expectedHash) // Matches exactly what the service will produce
@@ -138,10 +147,11 @@ public class OrderServiceCreateTest {
         when(idempotencyRepository.findById(KEY)).thenReturn(Optional.of(existingRecord));
         assertThrows(ResponseStatusException.class, () -> orderService.createOrder(createDTO, KEY));
     }
+
     @Test
     @DisplayName("Should throw error if first request is still processing (No orderId yet)")
     void createOrder_StillProcessing_ThrowsError() {
-        String expectedHash = (String) ReflectionTestUtils.invokeMethod(orderService, "generateHash", createDTO);
+        String expectedHash = idempotencyService.generateHash(createDTO);
 
         IdempotencyKey inProgressRecord = IdempotencyKey.builder()
                 .key(KEY).requestHash(expectedHash)
@@ -152,5 +162,48 @@ public class OrderServiceCreateTest {
         // Act & Assert
         var ex = assertThrows(ResponseStatusException.class, () -> orderService.createOrder(createDTO, KEY));
         assertEquals(HttpStatus.TOO_MANY_REQUESTS, ex.getStatusCode());
+    }
+
+    @Test
+    @DisplayName("Should aggregate order items with same productOfferingId")
+    void createOrder_AggregatesDuplicateItems() {
+        // Create DTO with duplicate productOfferingIds
+        OrderCreateDTO dtoWithDuplicates = new OrderCreateDTO(
+                "B2B", new CustomerDTO("CUST-01"), new SiteDTO("SITE-A"),
+                List.of(
+                        new OrderItemDTO("po-3", 3),
+                        new OrderItemDTO("po-3", 2),
+                        new OrderItemDTO("po-4", 1)
+                ),
+                new PaymentTypeDTO(PaymentType.INVOICE.name(), null));
+
+        // Expected aggregated result: po-3 with quantity 5, po-4 with quantity 1
+        CustomerOrder expectedOrder = CustomerOrder.builder()
+                .id(orderId)
+                .category(OrderCategory.B2B)
+                .customer(Customer.builder().id("CUST-01").build())
+                .site(Site.builder().id("SITE-A").build())
+                .paymentMethod(PaymentMethod.builder().paymentType(PaymentType.INVOICE).build())
+                .state(OrderState.DRAFT)
+                .orderItems(List.of(
+                        OrderItems.builder().id(1L).productOfferingId("po-3").quantity(5).build(),
+                        OrderItems.builder().id(2L).productOfferingId("po-4").quantity(1).build()
+                ))
+                .build();
+
+        when(orderRepository.save(any())).thenReturn(expectedOrder);
+
+        var result = orderService.createOrder(dtoWithDuplicates, null);
+
+        // Verify the result contains aggregated items
+        assertFalse(result.isReplay());
+        assertEquals(2, result.dto().items().size());
+
+        // Verify quantities are aggregated correctly
+        Map<String, Integer> resultQuantities = result.dto().items().stream()
+                .collect(Collectors.toMap(OrderItemDTO::productOfferingId, OrderItemDTO::quantity));
+
+        assertEquals(5, resultQuantities.get("po-3"));
+        assertEquals(1, resultQuantities.get("po-4"));
     }
 }

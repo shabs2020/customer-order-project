@@ -3,7 +3,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
-import com.customer.order.service.client.CatalogClient;
+import com.customer.order.service.component.CatalogClient;
 import com.customer.order.service.database.embeddables.Customer;
 import com.customer.order.service.database.embeddables.PaymentMethod;
 import com.customer.order.service.database.embeddables.Site;
@@ -15,14 +15,12 @@ import com.customer.order.service.database.repositories.CustomerOrderRepository;
 import com.customer.order.service.database.repositories.IdempotencyRepository;
 import com.customer.order.service.dto.OrderPatchDTO;
 import com.customer.order.service.dto.OrderResponseDTO;
-import com.customer.order.service.mappers.EntityToDtoMapping;
-import com.customer.order.service.service.OrderService;
+import com.customer.order.service.service.*;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.web.server.ResponseStatusException;
@@ -37,7 +35,10 @@ public class OrderServicePatchTest {
     @Mock
     private CatalogClient catalogClient;
 
-    private EntityToDtoMapping mapper;
+    private OrderMapper orderMapper;
+    private IdempotencyService idempotencyService;
+    private OrderValidationService orderValidationService;
+    private OrderStateMachine orderStateMachine;
 
     private OrderService orderService;
 
@@ -46,10 +47,17 @@ public class OrderServicePatchTest {
 
     @BeforeEach
     void setUp() {
-        this.mapper = new EntityToDtoMapping();
-        this.orderService = new OrderService(this.orderRepository,
-                this.idempotencyRepository,this.catalogClient,
-                this.mapper);
+        this.orderMapper = new OrderMapper();
+        this.idempotencyService = new IdempotencyService(this.idempotencyRepository, this.orderRepository, this.orderMapper);
+        this.orderValidationService = new OrderValidationService(this.catalogClient);
+        this.orderStateMachine = new OrderStateMachine();
+        this.orderService = new OrderService(
+                this.orderRepository,
+                this.idempotencyService,
+                this.orderValidationService,
+                this.orderStateMachine,
+                this.orderMapper
+        );
 
         orderId = UUID.randomUUID();
         existingOrder = CustomerOrder.builder()
@@ -60,6 +68,7 @@ public class OrderServicePatchTest {
                 .paymentMethod(PaymentMethod.builder().paymentType(PaymentType.INVOICE).build())
                 .state(OrderState.DRAFT).build();
     }
+
     @Test
     void patchOrder_ValidTransition_FromDraftToPreview() {
         OrderPatchDTO patch = new OrderPatchDTO(null, OrderState.PREVIEW.getValue(), null, null, null, null);
@@ -82,27 +91,41 @@ public class OrderServicePatchTest {
     void patchOrder_SubmittedState_AllowStateChangeOnly() {
 
         existingOrder.setState(OrderState.SUBMITTED);
-        OrderPatchDTO patch = new OrderPatchDTO(null, "confirmed", null, null,null, null);
+        OrderPatchDTO patch = new OrderPatchDTO(null, "confirmed", null, null, null, null);
 
         when(orderRepository.findById(orderId)).thenReturn(Optional.of(existingOrder));
         when(orderRepository.save(any())).thenAnswer(i -> i.getArguments()[0]);
 
         OrderResponseDTO result = orderService.patchOrder(orderId, patch);
         assertEquals(OrderState.CONFIRMED, result.state());
-        //State is confirmed, should not allow any further modifications
+        // State is confirmed, should not allow any further modifications
         OrderPatchDTO patchInvalid = new OrderPatchDTO(OrderCategory.B2C.name(), "confirmed", null, null, null, null);
         assertThrows(IllegalStateException.class, () -> orderService.patchOrder(orderId, patchInvalid));
 
     }
+
     @Test
-    void patchOrder_SubmittedState_AllowStateChangeOnlyII(){
+    void patchOrder_SubmittedState_AllowStateChangeOnlyII() {
 
         existingOrder.setState(OrderState.SUBMITTED);
-        OrderPatchDTO patch = new OrderPatchDTO(OrderCategory.B2C.name(), "confirmed", null, null, null,null);
+        OrderPatchDTO patch = new OrderPatchDTO(OrderCategory.B2C.name(), "confirmed", null, null, null, null);
         when(orderRepository.findById(orderId)).thenReturn(Optional.of(existingOrder));
         assertThrows(ResponseStatusException.class, () -> orderService.patchOrder(orderId, patch));
 
     }
-
+    /*
+     * @Test
+     * void patchOrder_SubmittedState_AllowStateChangeOnlyIII() {
+     * 
+     * existingOrder.setState(OrderState.SUBMITTED);
+     * OrderPatchDTO patch = new OrderPatchDTO(OrderCategory.B2B.name(),
+     * "confirmed", null, null, null, null);
+     * when(orderRepository.findById(orderId)).thenReturn(Optional.of(existingOrder)
+     * );
+     * OrderResponseDTO result = orderService.patchOrder(orderId, patch);
+     * assertEquals(OrderState.CONFIRMED, result.state());
+     * 
+     * }
+     */
 
 }
